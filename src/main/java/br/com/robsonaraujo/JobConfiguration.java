@@ -55,10 +55,15 @@ public class JobConfiguration {
 	
 	@Bean
 	@StepScope
-	public Tasklet helloWorldTasklet(@Value("#{jobParameters['timestamp']}") String message) {
-		return (stepContribution, chunkContext) -> {			
+	public Tasklet clearDatabaseTasklet(@Value("#{jobParameters['timestamp']}") String message, @Value("#{jobParameters['state']}") String state) {
+		return (stepContribution, chunkContext) -> {	
 			JdbcTemplate template = new JdbcTemplate(postgresDs);
-			template.execute("delete from person");
+			StringBuilder sql = new StringBuilder("delete from person where 1=1 ");
+			if (state != null) {
+				sql.append("and state = '" + state + "'");
+			}
+			
+			template.execute(sql.toString());
 			return RepeatStatus.FINISHED;
 		};
 	}
@@ -66,7 +71,7 @@ public class JobConfiguration {
 	@Bean
 	public Step step1() {
 		return stepBuilderFactory.get("step1")
-				.tasklet(helloWorldTasklet(null))				
+				.tasklet(clearDatabaseTasklet(null,null))				
 				.build();
 	}
 	
@@ -74,7 +79,7 @@ public class JobConfiguration {
 	public Step step2() {
 		return stepBuilderFactory.get("step2")
 				.<Person, Person>chunk(10)
-				.reader(pagingItemReader())
+				.reader(pagingItemReader(null))
 				.writer(customItemWriter())
 				.build();
 	}
@@ -97,7 +102,8 @@ public class JobConfiguration {
 	}
 	
 	@Bean
-	public JdbcPagingItemReader<Person> pagingItemReader() {
+	@StepScope // required to access jobParameters
+	public JdbcPagingItemReader<Person> pagingItemReader(@Value("#{jobParameters['state']}") String state) {
 		JdbcPagingItemReader<Person> reader = new JdbcPagingItemReader<>();
 		
 		reader.setDataSource(dataSource);
@@ -117,6 +123,10 @@ public class JobConfiguration {
 		MySqlPagingQueryProvider queryProvider = new MySqlPagingQueryProvider();
 		queryProvider.setSelectClause("id, first_name, last_name, email, gender, state, city");
 		queryProvider.setFromClause("from person");
+		
+		if (state != null) {
+			queryProvider.setWhereClause("where state = '" + state + "'");
+		}
 		
 		Map<String, Order> sortKeys = new HashMap<>(1);
 		sortKeys.put("id", Order.ASCENDING);
